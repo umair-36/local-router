@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-router"
+version = "0.1.0"
+description = "Headless local LLM router with OpenAI/OpenRouter-compatible API, auth, logging, and backend adapters."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "local-router contributors" }]
+dependencies = [
+  "fastapi>=0.111",
+  "uvicorn[standard]>=0.30",
+  "httpx>=0.27",
+  "pydantic>=2.7",
+  "typer>=0.12",
+  "PyYAML>=6.0",
+  "argon2-cffi>=23.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+local-router = "local_router.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["local_router*"]
+
+[tool.setuptools.package-data]
+local_router = ["py.typed"]

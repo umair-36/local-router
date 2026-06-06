@@ -1,0 +1,42 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  ollama-pull-qwen:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - ollama-data:/root/.ollama
+    command: ["pull", "qwen2.5:0.5b-instruct"]
+    restart: "no"
+
+  local-router:
+    build: .
+    depends_on:
+      ollama-pull-qwen:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    volumes:
+      - local-router-data:/var/lib/local-router
+      - local-router-logs:/var/log/local-router
+    environment:
+      LOCAL_ROUTER_CONFIG: /etc/local-router/config.yaml
+
+volumes:
+  ollama-data:
+  local-router-data:
+  local-router-logs:

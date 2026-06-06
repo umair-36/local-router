@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +31,8 @@ app.add_typer(config_app, name="config")
 
 
 def _cfg(config: Optional[Path], profile: Optional[str]) -> RouterConfig:
+    if config is None and os.environ.get("LOCAL_ROUTER_CONFIG"):
+        config = Path(os.environ["LOCAL_ROUTER_CONFIG"])
     return load_config(config, profile)
 
 

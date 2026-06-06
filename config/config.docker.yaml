@@ -1,0 +1,46 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+  public_base_url: http://127.0.0.1:8080/v1
+  request_timeout_seconds: 600
+auth:
+  mode: api_key_only
+  allowed_ips:
+    - 127.0.0.1/32
+    - ::1/128
+    - 172.16.0.0/12
+  key_store_path: /var/lib/local-router/keys.json
+backend:
+  provider: ollama
+  base_url: http://ollama:11434/v1
+  executable: null
+  model_path: null
+  env:
+    OLLAMA_NUM_PARALLEL: "1"
+    OLLAMA_MAX_QUEUE: "32"
+    OLLAMA_KEEP_ALIVE: "-1"
+  extra_args: []
+  manage_process: false
+model:
+  id: qwen2.5-0.5b-instruct
+  context_length: 8192
+  preload: true
+  keep_alive: -1
+scheduler:
+  max_in_flight: 1
+  max_queue: 32
+  queue_timeout_seconds: 300
+logging:
+  enabled: true
+  mode: usage_only
+  path: /var/log/local-router/usage.jsonl
+  redact_secrets: true
+paths:
+  catalog: models/catalog.yaml
+  runtime_dir: /var/lib/local-router/run
+profiles:
+  opencode:
+    context_length: 8192
+    preferred_context_length: 16384
+    streaming: true
+    queue_timeout_seconds: 300

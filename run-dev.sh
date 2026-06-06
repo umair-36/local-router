@@ -2,4 +2,12 @@
 set -euo pipefail
 CONFIG=${LOCAL_ROUTER_CONFIG:-config/dev.yaml}
 PROFILE=${LOCAL_ROUTER_PROFILE:-opencode}
-exec local-router serve --config "$CONFIG" --profile "$PROFILE"
+if [ -n "${LOCAL_ROUTER_BIN:-}" ]; then
+  :
+elif [ -x .venv/bin/local-router ]; then
+  LOCAL_ROUTER_BIN=.venv/bin/local-router
+else
+  LOCAL_ROUTER_BIN=local-router
+fi
+
+exec "$LOCAL_ROUTER_BIN" serve --config "$CONFIG" --profile "$PROFILE"

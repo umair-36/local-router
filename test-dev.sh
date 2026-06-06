@@ -8,10 +8,15 @@ KEY_LABEL=${LOCAL_ROUTER_TEST_KEY_LABEL:-opencode-smoke}
 MODEL=${LOCAL_ROUTER_TEST_MODEL:-qwen2.5-0.5b-instruct}
 BASE_URL=${LOCAL_ROUTER_TEST_BASE_URL:-http://127.0.0.1:8080/v1}
 SKIP_START=${LOCAL_ROUTER_TEST_SKIP_START:-0}
+VENV=${LOCAL_ROUTER_VENV:-.venv}
+PYTHON=${PYTHON:-python3}
 
 mkdir -p "$WORK_DIR" "$(dirname "$KEY_FILE")"
-python -m pip install -e '.[dev]'
-python - <<PY
+if [ ! -x "$VENV/bin/python" ]; then
+  "$PYTHON" -m venv "$VENV"
+fi
+"$VENV/bin/python" -m pip install -e '.[dev]'
+"$VENV/bin/python" - <<PY
 from pathlib import Path
 import yaml
 base = Path('$BASE_CONFIG')
@@ -31,16 +36,16 @@ else
 fi
 
 if [ ! -s "$KEY_FILE" ]; then
-  local-router keys add --config "$CONFIG" --label "$KEY_LABEL" --generate --write-secret-file "$KEY_FILE"
-elif ! local-router keys list --config "$CONFIG" | grep -Fxq "$KEY_LABEL"; then
-  local-router keys add --config "$CONFIG" --label "$KEY_LABEL" --secret-file "$KEY_FILE"
+  "$VENV/bin/local-router" keys add --config "$CONFIG" --label "$KEY_LABEL" --generate --write-secret-file "$KEY_FILE"
+elif ! "$VENV/bin/local-router" keys list --config "$CONFIG" | grep -Fxq "$KEY_LABEL"; then
+  "$VENV/bin/local-router" keys add --config "$CONFIG" --label "$KEY_LABEL" --secret-file "$KEY_FILE"
 fi
 
 if [ "$SKIP_START" = "1" ]; then
-  python tests/smoke/openai_smoke.py --base-url "$BASE_URL" --model "$MODEL" --api-key-file "$KEY_FILE"
+  "$VENV/bin/python" tests/smoke/openai_smoke.py --base-url "$BASE_URL" --model "$MODEL" --api-key-file "$KEY_FILE"
 else
-  local-router serve --config "$CONFIG" --profile opencode >"$WORK_DIR/router.log" 2>&1 &
+  "$VENV/bin/local-router" serve --config "$CONFIG" --profile opencode >"$WORK_DIR/router.log" 2>&1 &
   ROUTER_PID=$!
   trap 'kill "$ROUTER_PID" 2>/dev/null || true' EXIT
-  python tests/smoke/openai_smoke.py --base-url "$BASE_URL" --model "$MODEL" --api-key-file "$KEY_FILE"
+  "$VENV/bin/python" tests/smoke/openai_smoke.py --base-url "$BASE_URL" --model "$MODEL" --api-key-file "$KEY_FILE"
 fi

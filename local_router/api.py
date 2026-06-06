@@ -57,7 +57,7 @@ def create_app(config: RouterConfig) -> FastAPI:
     async def healthz() -> dict[str, Any]:
         return {"ok": True, "service": "local-router"}
 
-    @app.get("/readyz")
+    @app.get("/readyz", response_model=None)
     async def readyz() -> JSONResponse | dict[str, Any]:
         if not ready["ok"]:
             return error_response(503, "router is not ready", "service_unavailable")
@@ -67,14 +67,14 @@ def create_app(config: RouterConfig) -> FastAPI:
     async def models() -> dict[str, Any]:
         return {"object": "list", "data": [m.openai_model() for m in catalog.list()]}
 
-    @app.get("/v1/models/{model_id}")
+    @app.get("/v1/models/{model_id}", response_model=None)
     async def model_detail(model_id: str) -> JSONResponse | dict[str, Any]:
         try:
             return catalog.get(model_id).openai_model()
         except KeyError:
             return error_response(404, f"model not found: {model_id}", "invalid_request_error", "model_not_found")
 
-    @app.post("/v1/chat/completions")
+    @app.post("/v1/chat/completions", response_model=None)
     async def chat_completions(request: Request) -> JSONResponse | StreamingResponse | dict[str, Any]:
         payload = await request.json()
         payload["model"] = model.id
@@ -109,7 +109,7 @@ def create_app(config: RouterConfig) -> FastAPI:
         except BackendError as exc:
             return error_response(502, str(exc), "backend_error")
 
-    @app.post("/v1/completions")
+    @app.post("/v1/completions", response_model=None)
     async def completions(request: Request) -> JSONResponse | dict[str, Any]:
         payload = await request.json()
         payload["model"] = model.id
@@ -126,7 +126,7 @@ def create_app(config: RouterConfig) -> FastAPI:
         except BackendError as exc:
             return error_response(502, str(exc), "backend_error")
 
-    @app.post("/v1/responses")
+    @app.post("/v1/responses", response_model=None)
     async def responses(request: Request) -> JSONResponse | dict[str, Any]:
         payload = await request.json()
         payload["model"] = model.id

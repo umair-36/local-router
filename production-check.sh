@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
+VENV=${LOCAL_ROUTER_VENV:-.venv}
+PYTHON=${PYTHON:-python3}
 
-python -m pip install -e '.[dev]'
-python -m pytest -q
-local-router config validate --config config/dev.yaml --profile opencode
-local-router config validate --config config/config.docker.yaml --profile opencode
+if [ ! -x "$VENV/bin/python" ]; then
+  "$PYTHON" -m venv "$VENV"
+fi
+
+"$VENV/bin/python" -m pip install -e '.[dev]'
+"$VENV/bin/python" -m pytest -q
+"$VENV/bin/local-router" config validate --config config/dev.yaml --profile opencode
+"$VENV/bin/local-router" config validate --config config/config.docker.yaml --profile opencode
 bash -n install-dev.sh run-dev.sh test-dev.sh test-docker.sh production-check.sh
-python -m compileall local_router tests/smoke
+"$VENV/bin/python" -m compileall local_router tests/smoke
 
-python - <<'PY'
+"$VENV/bin/python" - <<'PY'
 from pathlib import Path
 
 blocked = [
@@ -26,7 +32,7 @@ violations: list[str] = []
 for path in Path(".").rglob("*"):
     if not path.is_file():
         continue
-    if ".git" in path.parts or "__pycache__" in path.parts or path in allowed_paths:
+    if ".git" in path.parts or ".venv" in path.parts or ".local-router-test" in path.parts or "__pycache__" in path.parts or path in allowed_paths:
         continue
     text = path.read_text(encoding="utf-8", errors="ignore")
     for term in blocked:

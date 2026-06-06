@@ -136,12 +136,14 @@ The router writes structured JSONL usage logs by default. Logged metadata includ
 
 The repository keeps the common operator/dev entrypoints at the repo root:
 
-- `./install-dev.sh` installs the direct Python development environment.
+- `./install-dev.sh` creates `.venv` when needed and installs the direct Python development environment there.
 - `./run-dev.sh` runs the router from `config/dev.yaml`.
 - `./test-dev.sh` runs the Qwen2.5 0.5B smoke test against a dev/local deployment.
 - `./test-docker.sh` builds the image, pulls `qwen2.5:0.5b-instruct`, starts Docker Compose, creates a persisted hashed API key, and runs the same smoke test through the Dockerized router.
 
 The smoke test itself lives at `tests/smoke/openai_smoke.py` and exercises `/readyz`, `/v1/models`, normal chat completions, and a tool-shaped chat request using the persistent `qwen2.5-0.5b-instruct` router model.
+
+For a public-IP run, use [`docs/run-public-api.md`](docs/run-public-api.md). Keep generated runtime config, key stores, raw key files, and logs outside tracked files.
 
 
 ## Production check

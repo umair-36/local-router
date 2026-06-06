@@ -4,6 +4,7 @@ MODEL=${LOCAL_ROUTER_TEST_MODEL:-qwen2.5-0.5b-instruct}
 BASE_URL=${LOCAL_ROUTER_TEST_BASE_URL:-http://127.0.0.1:8080/v1}
 KEY_FILE=${LOCAL_ROUTER_TEST_KEY_FILE:-.local-router-test/docker-opencode-key}
 KEY_LABEL=${LOCAL_ROUTER_TEST_KEY_LABEL:-opencode-docker-smoke}
+PYTHON=${PYTHON:-python3}
 
 mkdir -p "$(dirname "$KEY_FILE")"
 docker compose build local-router
@@ -24,4 +25,4 @@ else
 fi
 
 docker compose up -d local-router
-python tests/smoke/openai_smoke.py --base-url "$BASE_URL" --model "$MODEL" --api-key-file "$KEY_FILE"
+"$PYTHON" tests/smoke/openai_smoke.py --base-url "$BASE_URL" --model "$MODEL" --api-key-file "$KEY_FILE"

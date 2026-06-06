@@ -38,7 +38,7 @@ def wait_ready(base_url: str, timeout_seconds: float) -> None:
             status, _ = request_json("GET", base_url.removesuffix("/v1") + "/readyz", timeout=5)
             if status == 200:
                 return
-        except (URLError, TimeoutError) as exc:
+        except (URLError, TimeoutError, OSError) as exc:
             last_error = exc
         time.sleep(2)
     raise SystemExit(f"router did not become ready within {timeout_seconds}s; last_error={last_error}")

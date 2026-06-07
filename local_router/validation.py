@@ -30,6 +30,10 @@ def validate_config(config: RouterConfig, profile: str | None = None) -> Validat
     if not backend.capabilities.production_ready:
         errors.append(f"backend {backend.capabilities.name} is not production-ready for OpenAI-compatible serving")
     warnings.extend(backend.capabilities.limitations)
+    if config.backend.provider == "llama_cpp" and config.backend.manage_process and not config.backend.model_path:
+        errors.append("backend.model_path is required when managing a llama.cpp process")
+    if config.backend.gpu.enabled and (config.backend.provider != "llama_cpp" or not config.backend.manage_process):
+        warnings.append("backend.gpu only affects managed llama.cpp launches; configure GPU support directly in external runtimes")
     if config.auth.mode == "disabled":
         warnings.append("auth is disabled; this should only be used for explicitly trusted loopback-only development")
     if not config.logging.enabled:

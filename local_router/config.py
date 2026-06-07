@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 AuthMode = Literal["disabled", "ip_only", "api_key_only", "ip_or_key", "ip_and_key"]
 BackendName = Literal["ollama", "llama_cpp", "litert"]
+GpuLayers = int | Literal["auto", "all"]
 LoggingMode = Literal["usage_only", "full_content"]
 
 
@@ -25,6 +26,11 @@ class AuthConfig(BaseModel):
     key_store_path: str = "~/.local-router/keys.json"
 
 
+class BackendGpuConfig(BaseModel):
+    enabled: bool = False
+    layers: GpuLayers = "all"
+
+
 class BackendConfig(BaseModel):
     provider: BackendName = "ollama"
     base_url: str | None = None
@@ -33,6 +39,8 @@ class BackendConfig(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     extra_args: list[str] = Field(default_factory=list)
     manage_process: bool = False
+    startup_timeout_seconds: float = 300
+    gpu: BackendGpuConfig = Field(default_factory=BackendGpuConfig)
 
 
 class ModelConfig(BaseModel):

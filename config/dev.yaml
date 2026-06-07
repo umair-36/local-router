@@ -20,6 +20,10 @@ backend:
     OLLAMA_KEEP_ALIVE: "-1"
   extra_args: []
   manage_process: false
+  startup_timeout_seconds: 300
+  gpu:
+    enabled: false
+    layers: all
 model:
   id: qwen2.5-0.5b-instruct
   context_length: 8192

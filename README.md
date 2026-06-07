@@ -48,6 +48,26 @@ Important config sections:
 - `logging`: JSONL compliance log settings.
 - `profiles.opencode`: larger context defaults for OpenCode.
 
+## GPU offload
+
+The minimal GGUF server already passes `N_GPU_LAYERS` into `llama-cpp-python`; its packaged tray path currently defaults that value to `-1`.
+
+For the main router, Ollama and externally started llama.cpp servers keep their own GPU behavior. To have `local-router` start `llama-server` and opt into GPU offload, configure the llama.cpp backend like this:
+
+```yaml
+backend:
+  provider: llama_cpp
+  base_url: http://127.0.0.1:8081/v1
+  manage_process: true
+  executable: llama-server
+  model_path: /path/to/model.gguf
+  gpu:
+    enabled: true
+    layers: all
+```
+
+`layers` is passed to `llama-server` as `--n-gpu-layers`; it accepts an exact layer count, `auto`, or `all`. The `llama-server` binary still needs to be built with the relevant GPU backend, such as CUDA, Metal, ROCm, or Vulkan. The router omits the GPU offload flag while `gpu.enabled` is false.
+
 ## Manage API keys securely
 
 Generate a key for OpenCode, store only its hash in the router key store, and write the raw secret to a `0600` file for OpenCode to read:
@@ -172,6 +192,12 @@ docker compose up -d ollama
 docker compose run --rm ollama-pull-qwen
 docker compose run --rm local-router keys add --label opencode --generate --print-secret
 docker compose up -d local-router
+```
+
+For an NVIDIA GPU-backed Docker run, include the opt-in override when starting services:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d ollama local-router
 ```
 
 The Docker image keeps the same CLI entrypoint as the direct Python install. That means key management remains available inside the container:

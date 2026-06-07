@@ -12,3 +12,10 @@ def test_litert_selection_fails_validation_until_adapter_exists():
     report = validate_config(cfg, profile="opencode")
     assert not report.ok
     assert any("not production-ready" in error for error in report.errors)
+
+
+def test_managed_llama_cpp_requires_model_path():
+    cfg = RouterConfig(backend=BackendConfig(provider="llama_cpp", manage_process=True))
+    report = validate_config(cfg, profile="opencode")
+    assert not report.ok
+    assert any("model_path" in error for error in report.errors)

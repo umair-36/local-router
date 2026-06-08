@@ -1,111 +1,79 @@
-# Public API Run Process
+# Public API run process
 
-This runbook starts `local-router` on a public interface while keeping router API-key authentication enabled.
+This runbook exposes `local-router` on a public interface while keeping router
+API-key authentication enabled. It builds on `./router.sh`.
 
-## 1. Prepare Python
-
-```bash
-./install-dev.sh
-```
-
-The script creates `.venv` when needed and installs the package in editable mode with test dependencies.
-
-## 2. Start Or Verify Ollama
-
-Run Ollama as a service or foreground process, then make sure the configured model is present:
+## 1. Configure
 
 ```bash
-ollama list
-ollama pull qwen2.5:0.5b-instruct
+cp .env.example .env
 ```
 
-The default router config expects Ollama at `http://127.0.0.1:11434/v1`.
-
-## 3. Create A Public Runtime Config
-
-Keep the public runtime config and key store outside tracked files. One working layout is under `.local-router-test/`, which is already ignored by git.
+Keep the router bound to loopback and let nginx terminate public traffic:
 
 ```bash
-mkdir -p .local-router-test
-cp config/dev.yaml .local-router-test/public-run.yaml
+ROUTER_HOST=127.0.0.1
+ROUTER_PORT=8080
+ROUTER_AUTH_MODE=api_key_only
+ROUTER_PUBLIC_BASE_URL=http://YOUR_PUBLIC_IP/v1
 ```
 
-Edit `.local-router-test/public-run.yaml`:
+`api_key_only` means the API key guards every `/v1` request regardless of source
+IP, which is what you want behind a proxy. `/healthz` and `/readyz` stay
+unauthenticated as readiness probes.
 
-```yaml
-server:
-  host: 0.0.0.0
-  port: 8080
-  public_base_url: http://YOUR_PUBLIC_IP:8080/v1
-auth:
-  mode: api_key_only
-  key_store_path: .local-router-test/keys.json
-logging:
-  path: .local-router-test/usage.jsonl
-paths:
-  runtime_dir: .local-router-test/run
-```
-
-Leave `auth.mode` enabled for public runs. The router authenticates `/v1` endpoints with `Authorization: Bearer ...`; `/healthz` and `/readyz` remain unauthenticated readiness probes.
-
-## 4. Create A Test Key
+## 2. Bring the router up
 
 ```bash
-.venv/bin/local-router keys add \
-  --config .local-router-test/public-run.yaml \
-  --label public-test \
-  --generate \
-  --write-secret-file .local-router-test/public-test-key
+./router.sh up
 ```
 
-The key store keeps only the hash. The raw key file should stay untracked.
+This installs the package, ensures the backend is serving the model, provisions
+an API key under `.run/`, and starts the router. The printed API key (also at
+`.run/api-key`) is the client secret.
 
-## 5. Run The Router
+## 3. Put nginx in front
 
 ```bash
-.venv/bin/local-router serve --config .local-router-test/public-run.yaml --profile opencode
+sudo ./router.sh nginx
 ```
 
-The expected startup line is:
+nginx listens on port 80 and proxies to `http://127.0.0.1:8080`. Open port 80 in
+your firewall/security group.
 
-```text
-Uvicorn running on http://0.0.0.0:8080
+## 4. Smoke test
+
+Local:
+
+```bash
+./router.sh test
 ```
 
-## 6. Smoke Test
-
-Local check:
+Public IP:
 
 ```bash
 .venv/bin/python tests/smoke/openai_smoke.py \
-  --base-url http://127.0.0.1:8080/v1 \
+  --base-url http://YOUR_PUBLIC_IP/v1 \
   --model qwen2.5-0.5b-instruct \
-  --api-key-file .local-router-test/public-test-key
+  --api-key-file .run/api-key
 ```
 
-Public-IP check:
+A successful run prints `"ok": true` with an `assistant_sample`.
+
+From another machine, the same call as plain curl:
 
 ```bash
-.venv/bin/python tests/smoke/openai_smoke.py \
-  --base-url http://YOUR_PUBLIC_IP:8080/v1 \
-  --model qwen2.5-0.5b-instruct \
-  --api-key-file .local-router-test/public-test-key
+curl -s http://YOUR_PUBLIC_IP/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen2.5-0.5b-instruct","messages":[{"role":"user","content":"Say hello"}],"max_tokens":64}'
 ```
 
-Successful output includes:
-
-```json
-{
-  "ok": true,
-  "model": "qwen2.5-0.5b-instruct",
-  "assistant_sample": "local-router-ok"
-}
-```
-
-## 7. Operator Checks
-
-Run the full repository check before publishing changes:
+## 5. Operator check
 
 ```bash
 ./production-check.sh
 ```
+
+Keep generated runtime state (the `.run/` directory, raw key files, logs) out of
+version control; it is already ignored by git.

@@ -1,58 +1,257 @@
 # local-router
 
-A minimal, headless mechanism to deploy a local LLM and expose it through an OpenAI/OpenRouter-like API suitable for tools such as OpenCode.
+A headless local LLM router. It sits in front of a local model runtime
+(Ollama or llama.cpp) and exposes a stable OpenAI/OpenRouter-compatible API
+under `/v1`, adding the operational pieces local backends usually lack: stable
+model IDs, request queueing, API-key auth, readiness/preload hooks, and
+structured compliance logging.
 
-## Goals
+There are two ways to run a local model from this repo:
 
-`local-router` is designed to sit in front of local model runtimes and provide the operational controls that local backends often do not provide by themselves:
+- **This router** — full features, set up with one command below.
+- **[`minimal/`](minimal/README.md)** — a single self-contained GGUF server
+  when you want the smallest possible thing.
 
-- OpenAI/OpenRouter-like HTTP API under `/v1`.
-- Stable router model IDs hiding backend-specific model names or GGUF paths.
-- Request queueing so a second request is queued instead of refused while one generation is running.
-- API-key hash authentication and/or IP allowlisting.
-- Secure CLI commands for adding/removing hashed API keys.
-- Model preload/readiness hooks so the selected model is warm while the API is up.
-- Structured compliance logging.
-- Backend capability warnings, especially when a backend cannot satisfy a requirement natively.
-- Headless CLI-only operation.
-- OpenCode config generation.
+## Quickstart
 
-## Supported backend options
+```bash
+cp .env.example .env     # defaults work as-is; edit if you like
+./router.sh up
+```
 
-| Backend | Status | Notes |
+`./router.sh up` does the whole setup: it creates a `.venv` and installs the
+package, makes sure the backend (Ollama by default) is running with the model
+pulled, provisions an API key, starts the router, writes an OpenCode provider
+config, and waits until it is ready. When it finishes it prints the URL, the API
+key, and the OpenCode config path.
+
+Then:
+
+```bash
+./router.sh curl         # send a chat request and see the response
+./router.sh test         # smoke-test the running router
+./router.sh status       # is it up and ready?
+./router.sh logs         # follow the log
+./router.sh down         # stop it
+```
+
+That is the entire setup. Everything below is reference.
+
+## Configuration: `.env`
+
+`./router.sh` reads `.env` (it copies `.env.example` on first run). Every
+setting has a working default.
+
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| Ollama | Initial default | Proxies Ollama's OpenAI-compatible `/v1` API and uses Ollama native preload calls. Router auth is still required because Ollama's OpenAI-compatible API does not enforce client-provided API keys. |
-| llama.cpp / GGUF | Initial adapter | Proxies an existing `llama-server` OpenAI-compatible endpoint. Chat template and GGUF metadata quality matter for OpenCode behavior. |
-| LiteRT | Declared but not serve-enabled | LiteRT remains represented in capability/config validation. Selecting it now fails validation/startup clearly because no OpenAI-compatible LiteRT serving adapter is configured. |
+| `ROUTER_MODEL` | `qwen2.5-0.5b-instruct` | Router-facing model id (must exist in `models/catalog.yaml`). |
+| `ROUTER_BACKEND` | `ollama` | Runtime that serves the model: `ollama` or `llama_cpp`. |
+| `ROUTER_HOST` / `ROUTER_PORT` | `127.0.0.1` / `8080` | Address the router listens on. |
+| `ROUTER_CONTEXT_LENGTH` | `16384` | Context window the router advertises and requests. |
+| `ROUTER_AUTH_MODE` | `api_key_only` | `api_key_only`, `ip_only`, `ip_or_key`, `ip_and_key`, or `disabled`. |
+| `ROUTER_KEY_STORE` / `ROUTER_LOG_PATH` | under `.run/` | Hashed key store and usage log location. |
+| `ROUTER_PUBLIC_BASE_URL` | unset | Public URL clients use, when different from `host:port`. |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434/v1` | Where the router reaches Ollama. |
+| `OLLAMA_MODEL_TAG` | derived from catalog | Ollama tag to pull. |
+| `LLAMA_BASE_URL` | `http://127.0.0.1:8081/v1` | Where the router reaches a running `llama-server`. |
+| `LLAMA_GPU_LAYERS` | `off` | GPU offload hint for a router-managed `llama-server`. |
 
-## Install for development
+## `router.sh` commands
+
+| Command | What it does |
+| --- | --- |
+| `up` (default) | Install, start the backend, serve the router, write the OpenCode config. Idempotent. |
+| `down` | Stop the router (`down --all` also stops a router-started Ollama). |
+| `restart` | `down` then `up`. |
+| `status` | Show whether the router is up and ready. |
+| `logs` | Follow the router log. |
+| `test` | Run the smoke test against the running router. |
+| `curl` | Print the OpenAI-compatible chat request and run it against the router. |
+| `key [show\|create\|list]` | Inspect or create the API key. |
+| `opencode [path]` | Write the OpenCode provider config (default `opencode.local-router.json`). |
+| `nginx` | Front the router with nginx on port 80 for public access. |
+
+## Calling the API
+
+The router speaks the OpenAI/OpenRouter `/v1` API, which is what OpenCode and
+other clients expect. With `ROUTER_AUTH_MODE=api_key_only` every `/v1` call
+carries `Authorization: Bearer <key>` — the key printed by `up`, also stored at
+`.run/api-key`. `./router.sh curl` prints the request and runs it for you; the
+raw forms are:
+
+List models:
 
 ```bash
-python -m pip install -e '.[dev]'
+curl -s http://127.0.0.1:8080/v1/models \
+  -H "Authorization: Bearer $(cat .run/api-key)"
 ```
 
-## Create a config
+Chat completion:
 
 ```bash
-local-router config init --output config/dev.yaml
-local-router config validate --config config/dev.yaml --profile opencode
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H "Authorization: Bearer $(cat .run/api-key)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5-0.5b-instruct",
+    "messages": [{"role": "user", "content": "Say hello"}],
+    "max_tokens": 64
+  }'
 ```
 
-Important config sections:
+`model` is the router-facing id from `models/catalog.yaml`, not the backend's
+internal name. `/v1/completions` and `/v1/responses` work the same way. From
+another machine, swap the host for your public address (see Public IP access).
+Responses match the OpenAI schema, so any OpenAI-compatible SDK works by setting
+its base URL to the router's `/v1` and its key to the router key.
 
-- `server`: public router host/port.
-- `auth`: IP allowlist and API-key hash store.
-- `backend`: selected runtime (`ollama`, `llama_cpp`, or `litert`).
-- `model`: stable router model id and context length.
-- `scheduler`: in-flight and queue limits.
-- `logging`: JSONL compliance log settings.
-- `profiles.opencode`: larger context defaults for OpenCode.
+## Backends
 
-## GPU offload
+- **Ollama** (default): fully automated by `router.sh` — it installs Ollama if
+  missing, starts it, and pulls the model. Router auth is still required because
+  Ollama's OpenAI-compatible API does not enforce client-provided keys.
+- **llama.cpp**: run a `llama-server` yourself (the `minimal/` folder ships one),
+  set `ROUTER_BACKEND=llama_cpp` and `LLAMA_BASE_URL`, then `./router.sh up`.
+  For a router-managed `llama-server` with GPU offload, use a YAML config (below).
 
-The minimal GGUF server already passes `N_GPU_LAYERS` into `llama-cpp-python`; its packaged tray path currently defaults that value to `-1`.
+LiteRT is represented in capability/config validation but has no serve adapter;
+selecting it fails validation clearly.
 
-For the main router, Ollama and externally started llama.cpp servers keep their own GPU behavior. To have `local-router` start `llama-server` and opt into GPU offload, configure the llama.cpp backend like this:
+## Public IP access
+
+Keep the router on `127.0.0.1` and put nginx in front of it:
+
+```bash
+./router.sh up
+sudo ./router.sh nginx
+```
+
+nginx then proxies `http://<public-ip>/` to the router. Keep
+`ROUTER_AUTH_MODE=api_key_only` so the API key is what guards access. See
+[`docs/run-public-api.md`](docs/run-public-api.md) for the full runbook.
+
+## OpenCode integration
+
+`./router.sh up` already writes the provider config to `OPENCODE_CONFIG`
+(default `opencode.local-router.json`). Regenerate it any time:
+
+```bash
+./router.sh opencode
+```
+
+Point OpenCode at it:
+
+```bash
+opencode --config opencode.local-router.json
+```
+
+The config uses `@ai-sdk/openai-compatible`, sets `baseURL` to the router's
+`/v1`, references the API key file so the raw secret stays out of the config,
+and exposes stable router model IDs. The default model is
+`local-router/qwen2.5-0.5b-instruct`. A trimmed view:
+
+```json
+{
+  "provider": {
+    "local-router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": { "baseURL": "http://127.0.0.1:8080/v1", "apiKey": "{file:.run/api-key}" },
+      "models": { "qwen2.5-0.5b-instruct": { "name": "Qwen2.5 0.5B Instruct Local" } }
+    }
+  },
+  "model": "local-router/qwen2.5-0.5b-instruct"
+}
+```
+
+## Model catalog
+
+Models live in [`models/catalog.yaml`](models/catalog.yaml). Each entry has a
+router-facing `id`, backend-specific references, quantization/context metadata,
+a rough load-memory estimate, and OpenCode suitability metadata. Inspect them:
+
+```bash
+.venv/bin/local-router models list --for opencode
+.venv/bin/local-router models show qwen2.5-0.5b-instruct
+.venv/bin/local-router estimate --model qwen2.5-0.5b-instruct --backend ollama
+```
+
+Memory estimates are intentionally rough and exclude dynamic KV cache/context
+memory, which scales with context length and parallel slots.
+
+## API keys
+
+`./router.sh up` provisions a key automatically. To manage keys directly:
+
+```bash
+.venv/bin/local-router keys list
+.venv/bin/local-router keys add --label operator
+.venv/bin/local-router keys disable --label opencode
+.venv/bin/local-router keys remove --label opencode
+```
+
+Only the argon2 hash is stored; raw secrets are written to `0600` files.
+
+## Endpoints
+
+- `GET /healthz`, `GET /readyz`
+- `GET /v1/models`, `GET /v1/models/{model}`
+- `POST /v1/chat/completions`, `POST /v1/completions`, `POST /v1/responses`
+- `GET /v1/local-router/backends`
+
+`/healthz` and `/readyz` stay unauthenticated; `/v1` endpoints require auth per
+`ROUTER_AUTH_MODE`.
+
+## Compliance logging
+
+The router writes structured JSONL usage logs (`ROUTER_LOG_PATH`). Logged
+metadata includes request id, endpoint, client IP, key label, backend/model,
+queue wait, generation parameters, latency, status, and backend-reported usage.
+Full prompt/response logging can be enabled with `logging.mode: full_content` in
+a YAML config once compliance requirements are confirmed.
+
+## Docker
+
+```bash
+./test-docker.sh
+```
+
+This builds the image, starts Ollama, pulls the model, provisions a hashed key,
+starts the router, and runs the smoke test through the Dockerized router. To run
+the services directly:
+
+```bash
+docker compose build local-router
+docker compose up -d ollama
+docker compose run --rm ollama-pull-qwen
+docker compose run --rm local-router keys add --label opencode --generate --print-secret
+docker compose up -d local-router
+```
+
+For an NVIDIA GPU-backed run, add the opt-in override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d ollama local-router
+```
+
+The Docker image keeps the same CLI entrypoint, so key management works inside
+the container. The container config is `config/config.docker.yaml`. Persistent
+volumes hold Ollama data (`ollama-data`), the key store (`local-router-data`),
+and logs (`local-router-logs`).
+
+## Advanced: YAML config
+
+`.env` covers the common path. For multiple profiles, a router-managed
+`llama-server`, GPU offload, or per-field tuning, use a YAML config instead. It
+takes precedence over `.env` when supplied via `--config` or
+`LOCAL_ROUTER_CONFIG`.
+
+```bash
+.venv/bin/local-router config init --output config/dev.yaml
+.venv/bin/local-router config validate --config config/dev.yaml --profile opencode
+.venv/bin/local-router serve --config config/dev.yaml --profile opencode
+```
+
+Router-managed llama.cpp with GPU offload:
 
 ```yaml
 backend:
@@ -66,151 +265,16 @@ backend:
     layers: all
 ```
 
-`layers` is passed to `llama-server` as `--n-gpu-layers`; it accepts an exact layer count, `auto`, or `all`. The `llama-server` binary still needs to be built with the relevant GPU backend, such as CUDA, Metal, ROCm, or Vulkan. The router omits the GPU offload flag while `gpu.enabled` is false.
-
-## Manage API keys securely
-
-Generate a key for OpenCode, store only its hash in the router key store, and write the raw secret to a `0600` file for OpenCode to read:
-
-```bash
-local-router keys add --label opencode --generate --write-secret-file ~/.local-router/opencode-key
-```
-
-Manual key entry is hidden and confirmed:
-
-```bash
-local-router keys add --label operator
-```
-
-Other commands:
-
-```bash
-local-router keys list
-local-router keys disable --label opencode
-local-router keys remove --label opencode
-```
-
-## Model catalog
-
-Initial Qwen and Gemma entries live in [`models/catalog.yaml`](models/catalog.yaml). Add models by appending YAML entries with:
-
-- router-facing `id`;
-- backend-specific references;
-- quantization and context metadata;
-- rough load-memory estimate;
-- OpenCode suitability metadata.
-
-Inspect models:
-
-```bash
-local-router models list --for opencode
-local-router models show qwen2.5-0.5b-instruct
-local-router estimate --model qwen2.5-0.5b-instruct --backend ollama --profile opencode
-```
-
-Memory estimates are intentionally rough. Catalog load memory excludes dynamic KV cache/context memory, which scales with context length and parallel slots.
-
-## Run the router
-
-```bash
-local-router serve --config config/dev.yaml --profile opencode
-```
-
-Implemented endpoints include:
-
-- `GET /healthz`
-- `GET /readyz`
-- `GET /v1/models`
-- `GET /v1/models/{model}`
-- `POST /v1/chat/completions`
-- `POST /v1/completions`
-- `POST /v1/responses`
-- `GET /v1/local-router/backends`
-
-## OpenCode integration
-
-Generate an OpenCode provider config that points at the router rather than at a raw backend:
-
-```bash
-local-router opencode config \
-  --config config/dev.yaml \
-  --provider-id local-router \
-  --api-key-file ~/.local-router/opencode-key \
-  --output opencode.local-router.json
-```
-
-The generated provider uses `@ai-sdk/openai-compatible`, points `baseURL` at the router's `/v1`, and exposes stable router model IDs such as `local-router/qwen2.5-0.5b-instruct`.
-
-## Compliance logging
-
-The router writes structured JSONL usage logs by default. Logged metadata includes request id, endpoint, client IP, auth key label, backend/model information, queue wait, generation parameters, latency, status, and usage when a backend returns it. Full prompt/response content logging can be enabled with `logging.mode: full_content` once an operator has confirmed their compliance requirements.
-
-## Production-readiness notes
-
-- Ollama and llama.cpp adapters proxy already-running backends by default; Docker Compose provides the Ollama deployment path.
-- llama.cpp deployments should point `backend.base_url` at a running `llama-server` with the selected GGUF loaded.
-- LiteRT is declared for capability visibility, but config validation and startup reject it until a concrete OpenAI-compatible LiteRT adapter is configured.
-- OpenAI `/v1/responses` is native for llama.cpp and explicitly translated for Ollama with response metadata marking the translation.
-
-## Up-front scripts
-
-The repository keeps the common operator/dev entrypoints at the repo root:
-
-- `./install-dev.sh` creates `.venv` when needed and installs the direct Python development environment there.
-- `./run-dev.sh` runs the router from `config/dev.yaml`.
-- `./test-dev.sh` runs the Qwen2.5 0.5B smoke test against a dev/local deployment.
-- `./test-docker.sh` builds the image, pulls `qwen2.5:0.5b-instruct`, starts Docker Compose, creates a persisted hashed API key, and runs the same smoke test through the Dockerized router.
-
-The smoke test itself lives at `tests/smoke/openai_smoke.py` and exercises `/readyz`, `/v1/models`, normal chat completions, and a tool-shaped chat request using the persistent `qwen2.5-0.5b-instruct` router model.
-
-For a public-IP run, use [`docs/run-public-api.md`](docs/run-public-api.md). Keep generated runtime config, key stores, raw key files, and logs outside tracked files.
-
+`layers` is passed to `llama-server` as `--n-gpu-layers` and accepts a layer
+count, `auto`, or `all`. The `llama-server` binary must be built with the
+relevant GPU backend (CUDA, Metal, ROCm, or Vulkan).
 
 ## Production check
-
-Run the repository-level production check before shipping changes:
 
 ```bash
 ./production-check.sh
 ```
 
-This runs unit checks, config validation, shell syntax checks, Python compilation, Docker Compose config validation when Docker is available, and a source scan that rejects blocked scaffold/prototype terms.
-
-## Docker deployment
-
-Build and run with Docker Compose:
-
-```bash
-./test-docker.sh
-```
-
-Or run the steps manually:
-
-```bash
-docker compose build local-router
-docker compose up -d ollama
-docker compose run --rm ollama-pull-qwen
-docker compose run --rm local-router keys add --label opencode --generate --print-secret
-docker compose up -d local-router
-```
-
-For an NVIDIA GPU-backed Docker run, include the opt-in override when starting services:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d ollama local-router
-```
-
-The Docker image keeps the same CLI entrypoint as the direct Python install. That means key management remains available inside the container:
-
-```bash
-docker compose run --rm local-router keys list
-docker compose run --rm local-router keys add --label operator
-```
-
-Persistent Docker volumes are used for:
-
-- Ollama model data: `ollama-data`.
-- Router key store/runtime data: `local-router-data`.
-- Router compliance logs: `local-router-logs`.
-
-The Docker config is `config/config.docker.yaml` and defaults to the Qwen smoke-test model.
+This runs unit tests, config validation, shell syntax checks, Python
+compilation, Docker Compose config validation (when Docker is available), and a
+source scan for blocked scaffold/prototype terms.

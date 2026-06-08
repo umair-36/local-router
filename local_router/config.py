@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -112,9 +114,72 @@ def expand_path(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
 
 
+def _gpu_layers(value: str) -> int | str:
+    text = value.strip().lower()
+    if text in {"auto", "all"}:
+        return text
+    return int(text)
+
+
+def config_from_env(env: Mapping[str, str] | None = None) -> RouterConfig:
+    """Build a router config from defaults plus ``ROUTER_*`` environment overrides.
+
+    This is the flat, file-light counterpart to a YAML config: the handful of
+    settings most deployments touch are read from environment variables, which
+    ``router.sh`` typically loads from a ``.env`` file. Any variable that is not
+    set keeps the same default a fresh :class:`RouterConfig` would use, so an
+    empty environment reproduces the built-in defaults exactly.
+    """
+    values = os.environ if env is None else env
+    data = RouterConfig().model_dump(mode="python")
+
+    server = data["server"]
+    if values.get("ROUTER_HOST"):
+        server["host"] = values["ROUTER_HOST"]
+    if values.get("ROUTER_PORT"):
+        server["port"] = int(values["ROUTER_PORT"])
+    if values.get("ROUTER_PUBLIC_BASE_URL"):
+        server["public_base_url"] = values["ROUTER_PUBLIC_BASE_URL"]
+
+    model = data["model"]
+    if values.get("ROUTER_MODEL"):
+        model["id"] = values["ROUTER_MODEL"]
+    if values.get("ROUTER_CONTEXT_LENGTH"):
+        model["context_length"] = int(values["ROUTER_CONTEXT_LENGTH"])
+
+    auth = data["auth"]
+    if values.get("ROUTER_AUTH_MODE"):
+        auth["mode"] = values["ROUTER_AUTH_MODE"]
+    if values.get("ROUTER_KEY_STORE"):
+        auth["key_store_path"] = values["ROUTER_KEY_STORE"]
+    if values.get("ROUTER_ALLOWED_IPS"):
+        auth["allowed_ips"] = [ip.strip() for ip in values["ROUTER_ALLOWED_IPS"].split(",") if ip.strip()]
+
+    if values.get("ROUTER_LOG_PATH"):
+        data["logging"]["path"] = values["ROUTER_LOG_PATH"]
+
+    backend = data["backend"]
+    if values.get("ROUTER_BACKEND"):
+        backend["provider"] = values["ROUTER_BACKEND"]
+    if backend["provider"] == "ollama" and values.get("OLLAMA_BASE_URL"):
+        backend["base_url"] = values["OLLAMA_BASE_URL"]
+    if backend["provider"] == "llama_cpp":
+        if values.get("LLAMA_BASE_URL"):
+            backend["base_url"] = values["LLAMA_BASE_URL"]
+        if values.get("LLAMA_MODEL_PATH"):
+            backend["model_path"] = values["LLAMA_MODEL_PATH"]
+        if values.get("LLAMA_MANAGE_PROCESS", "").strip().lower() in {"1", "true", "yes"}:
+            backend["manage_process"] = True
+        layers = values.get("LLAMA_GPU_LAYERS", "").strip().lower()
+        if layers and layers not in {"off", "none", "false", "0"}:
+            backend["gpu"] = {"enabled": True, "layers": _gpu_layers(layers)}
+
+    return RouterConfig.model_validate(data)
+
+
 def load_config(path: str | Path | None = None, profile: str | None = None) -> RouterConfig:
     if path is None:
-        cfg = RouterConfig()
+        cfg = config_from_env()
     else:
         with open(expand_path(path), "r", encoding="utf-8") as fh:
             data: dict[str, Any] = yaml.safe_load(fh) or {}

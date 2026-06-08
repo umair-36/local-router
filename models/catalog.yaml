@@ -97,3 +97,23 @@ models:
       min_context_recommended: 16384
       notes:
         - Larger Gemma option for local coding workflows when memory allows.
+  - id: gemma-4-12b-qat
+    name: Gemma 4 12B (QAT)
+    family: gemma4
+    quantization: Q4_K_XL (Unsloth UD QAT GGUF)
+    context_length: 262144
+    memory:
+      load_gb: 6.7
+      note: Q4_K_XL weights are ~6.7 GB; a full 256K KV cache adds many GB on top, so the full window needs a large-RAM host or a GPU. Use flash attention and KV-cache quantization to fit, or lower the context.
+    backends:
+      llama_cpp:
+        gguf: /models/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+        limitations:
+          - Download the GGUF and serve it with llama.cpp's llama-server at --ctx-size 262144, then point LLAMA_BASE_URL at it. See the README "256K context" section.
+    opencode:
+      compatible: true
+      display_name: Gemma 4 12B Local (256K)
+      tool_calling: limited
+      min_context_recommended: 16384
+      notes:
+        - Full 256K-context Gemma 4 for long-context local coding via llama.cpp.

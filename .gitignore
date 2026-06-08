@@ -7,4 +7,6 @@ __pycache__/
 .env
 .venv/
 
+.run/
+opencode.local-router.json
 .local-router-test/

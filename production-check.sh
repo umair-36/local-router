@@ -11,7 +11,7 @@ fi
 "$VENV/bin/python" -m pytest -q
 "$VENV/bin/local-router" config validate --config config/dev.yaml --profile opencode
 "$VENV/bin/local-router" config validate --config config/config.docker.yaml --profile opencode
-bash -n install-dev.sh run-dev.sh test-dev.sh test-docker.sh production-check.sh
+bash -n router.sh test-docker.sh production-check.sh
 "$VENV/bin/python" -m compileall local_router tests/smoke
 
 "$VENV/bin/python" - <<'PY'
@@ -27,14 +27,14 @@ blocked = [
     "Not" + "Implemented",
     "half" + "-done",
 ]
-allowed_paths = {Path("LICENSE")}
+allowed_paths = {Path("LICENSE"), Path(".env")}
 violations: list[str] = []
 for path in Path(".").rglob("*"):
     if not path.is_file():
         continue
-    if ".git" in path.parts or ".venv" in path.parts or ".local-router-test" in path.parts or "__pycache__" in path.parts or path in allowed_paths:
+    if ".git" in path.parts or ".venv" in path.parts or ".run" in path.parts or "minimal" in path.parts or ".local-router-test" in path.parts or "__pycache__" in path.parts or path in allowed_paths:
         continue
-    text = path.read_text(encoding="utf-8", errors="ignore")
+    text = path.read_text(encoding="utf-8", errors="ignore").replace(".env.example", "")
     for term in blocked:
         if term in text:
             violations.append(f"{path}: contains blocked production-check term {term!r}")

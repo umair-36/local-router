@@ -60,6 +60,15 @@ Public IP:
 
 A successful run prints `"ok": true` with an `assistant_sample`.
 
+From another machine, the same call as plain curl:
+
+```bash
+curl -s http://YOUR_PUBLIC_IP/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen2.5-0.5b-instruct","messages":[{"role":"user","content":"Say hello"}],"max_tokens":64}'
+```
+
 ## 5. Operator check
 
 ```bash

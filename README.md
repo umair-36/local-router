@@ -21,14 +21,15 @@ cp .env.example .env     # defaults work as-is; edit if you like
 
 `./router.sh up` does the whole setup: it creates a `.venv` and installs the
 package, makes sure the backend (Ollama by default) is running with the model
-pulled, provisions an API key, starts the router, and waits until it is ready.
-When it finishes it prints the URL and API key.
+pulled, provisions an API key, starts the router, writes an OpenCode provider
+config, and waits until it is ready. When it finishes it prints the URL, the API
+key, and the OpenCode config path.
 
 Then:
 
 ```bash
+./router.sh curl         # send a chat request and see the response
 ./router.sh test         # smoke-test the running router
-./router.sh opencode     # write an OpenCode provider config
 ./router.sh status       # is it up and ready?
 ./router.sh logs         # follow the log
 ./router.sh down         # stop it
@@ -59,15 +60,50 @@ setting has a working default.
 
 | Command | What it does |
 | --- | --- |
-| `up` (default) | Install, start the backend, serve the router. Idempotent. |
+| `up` (default) | Install, start the backend, serve the router, write the OpenCode config. Idempotent. |
 | `down` | Stop the router (`down --all` also stops a router-started Ollama). |
 | `restart` | `down` then `up`. |
 | `status` | Show whether the router is up and ready. |
 | `logs` | Follow the router log. |
 | `test` | Run the smoke test against the running router. |
+| `curl` | Print the OpenAI-compatible chat request and run it against the router. |
 | `key [show\|create\|list]` | Inspect or create the API key. |
-| `opencode [path]` | Write an OpenCode provider config (default `opencode.local-router.json`). |
+| `opencode [path]` | Write the OpenCode provider config (default `opencode.local-router.json`). |
 | `nginx` | Front the router with nginx on port 80 for public access. |
+
+## Calling the API
+
+The router speaks the OpenAI/OpenRouter `/v1` API, which is what OpenCode and
+other clients expect. With `ROUTER_AUTH_MODE=api_key_only` every `/v1` call
+carries `Authorization: Bearer <key>` — the key printed by `up`, also stored at
+`.run/api-key`. `./router.sh curl` prints the request and runs it for you; the
+raw forms are:
+
+List models:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/models \
+  -H "Authorization: Bearer $(cat .run/api-key)"
+```
+
+Chat completion:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H "Authorization: Bearer $(cat .run/api-key)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5-0.5b-instruct",
+    "messages": [{"role": "user", "content": "Say hello"}],
+    "max_tokens": 64
+  }'
+```
+
+`model` is the router-facing id from `models/catalog.yaml`, not the backend's
+internal name. `/v1/completions` and `/v1/responses` work the same way. From
+another machine, swap the host for your public address (see Public IP access).
+Responses match the OpenAI schema, so any OpenAI-compatible SDK works by setting
+its base URL to the router's `/v1` and its key to the router key.
 
 ## Backends
 
@@ -96,14 +132,36 @@ nginx then proxies `http://<public-ip>/` to the router. Keep
 
 ## OpenCode integration
 
+`./router.sh up` already writes the provider config to `OPENCODE_CONFIG`
+(default `opencode.local-router.json`). Regenerate it any time:
+
 ```bash
 ./router.sh opencode
 ```
 
-This writes `opencode.local-router.json` using `@ai-sdk/openai-compatible`,
-pointing `baseURL` at the router's `/v1` and exposing stable router model IDs
-such as `local-router/qwen2.5-0.5b-instruct`. The generated file references the
-API key file so the raw secret stays out of the config.
+Point OpenCode at it:
+
+```bash
+opencode --config opencode.local-router.json
+```
+
+The config uses `@ai-sdk/openai-compatible`, sets `baseURL` to the router's
+`/v1`, references the API key file so the raw secret stays out of the config,
+and exposes stable router model IDs. The default model is
+`local-router/qwen2.5-0.5b-instruct`. A trimmed view:
+
+```json
+{
+  "provider": {
+    "local-router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": { "baseURL": "http://127.0.0.1:8080/v1", "apiKey": "{file:.run/api-key}" },
+      "models": { "qwen2.5-0.5b-instruct": { "name": "Qwen2.5 0.5B Instruct Local" } }
+    }
+  },
+  "model": "local-router/qwen2.5-0.5b-instruct"
+}
+```
 
 ## Model catalog
 

@@ -2,14 +2,15 @@
 #
 # router.sh - one entry point to set up and run local-router.
 #
-#   ./router.sh up         install deps, start the backend, serve the router
+#   ./router.sh up         install, start the backend, serve, write OpenCode config
 #   ./router.sh down        stop the router
 #   ./router.sh restart     down then up
 #   ./router.sh status      show whether the router is up and ready
 #   ./router.sh logs        follow the router log
 #   ./router.sh test        smoke-test the running router
+#   ./router.sh curl        send a sample chat request to the running router
 #   ./router.sh key [...]   show / create / list API keys
-#   ./router.sh opencode    write an OpenCode provider config
+#   ./router.sh opencode    write the OpenCode provider config
 #   ./router.sh nginx       front the router with nginx on port 80
 #
 # Configuration is read from .env (created from .env.example on first run).
@@ -32,7 +33,7 @@ warn() { printf '\033[1;33m[router]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[router]\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '/^# router\.sh - /,/^# Configuration is read/p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 load_env() {
@@ -53,6 +54,7 @@ load_env() {
   : "${ROUTER_KEY_STORE:=$RUN_DIR/keys.json}"
   : "${OLLAMA_BASE_URL:=http://127.0.0.1:11434/v1}"
   : "${LLAMA_BASE_URL:=http://127.0.0.1:8081/v1}"
+  : "${OPENCODE_CONFIG:=opencode.local-router.json}"
 
   KEY_FILE="${ROUTER_KEY_FILE:-$RUN_DIR/api-key}"
   KEY_LABEL="${ROUTER_KEY_LABEL:-opencode}"
@@ -196,19 +198,28 @@ start_router() {
 print_summary() {
   log "router ready"
   echo
-  printf '  URL:      %s\n' "$(router_url)"
-  printf '  model:    %s (%s backend)\n' "$ROUTER_MODEL" "$ROUTER_BACKEND"
+  printf '  URL:       %s\n' "$(router_url)"
+  printf '  model:     %s (%s backend)\n' "$ROUTER_MODEL" "$ROUTER_BACKEND"
   if [ -s "$KEY_FILE" ]; then
-    printf '  API key:  %s\n' "$(cat "$KEY_FILE")"
-    printf '  key file: %s\n' "$KEY_FILE"
+    printf '  API key:   %s\n' "$(cat "$KEY_FILE")"
+    printf '  key file:  %s\n' "$KEY_FILE"
   else
-    printf '  auth:     %s (no key required)\n' "$ROUTER_AUTH_MODE"
+    printf '  auth:      %s (no key required)\n' "$ROUTER_AUTH_MODE"
   fi
+  [ -s "$OPENCODE_CONFIG" ] && printf '  opencode:  %s\n' "$OPENCODE_CONFIG"
   echo
-  echo "  test:     ./router.sh test"
-  echo "  opencode: ./router.sh opencode"
-  echo "  logs:     ./router.sh logs"
-  echo "  stop:     ./router.sh down"
+  echo "  call the API:    ./router.sh curl"
+  echo "  use in OpenCode: opencode --config $OPENCODE_CONFIG"
+  echo "  smoke test:      ./router.sh test"
+  echo "  logs / stop:     ./router.sh logs   |   ./router.sh down"
+}
+
+write_opencode() {
+  if [ -s "$KEY_FILE" ]; then
+    "$VENV/bin/local-router" opencode config --output "$OPENCODE_CONFIG" --api-key-file "$KEY_FILE" >/dev/null
+  else
+    "$VENV/bin/local-router" opencode config --output "$OPENCODE_CONFIG" >/dev/null
+  fi
 }
 
 cmd_up() {
@@ -216,6 +227,7 @@ cmd_up() {
   ensure_backend
   ensure_key
   start_router
+  write_opencode
   print_summary
 }
 
@@ -261,6 +273,29 @@ cmd_test() {
   fi
 }
 
+# Show the OpenAI-compatible request shape, then run it against the live router.
+cmd_curl() {
+  router_running || die "router is not running; start it with ./router.sh up"
+  local url data
+  url="$(router_url)/chat/completions"
+  data='{"model":"'"$ROUTER_MODEL"'","messages":[{"role":"user","content":"Say hello in five words."}],"max_tokens":64}'
+
+  log "POST $url"
+  echo "  curl -s $url \\"
+  if [ -s "$KEY_FILE" ]; then
+    echo "    -H \"Authorization: Bearer \$(cat $KEY_FILE)\" \\"
+  fi
+  echo "    -H 'Content-Type: application/json' \\"
+  echo "    -d '$data'"
+  echo
+  if [ -s "$KEY_FILE" ]; then
+    curl -s "$url" -H "Authorization: Bearer $(cat "$KEY_FILE")" -H "Content-Type: application/json" -d "$data"
+  else
+    curl -s "$url" -H "Content-Type: application/json" -d "$data"
+  fi
+  echo
+}
+
 cmd_key() {
   ensure_venv
   case "${1:-show}" in
@@ -283,13 +318,11 @@ cmd_key() {
 
 cmd_opencode() {
   ensure_venv
-  local out="${1:-opencode.local-router.json}"
-  if [ -s "$KEY_FILE" ]; then
-    "$VENV/bin/local-router" opencode config --output "$out" --api-key-file "$KEY_FILE"
-  else
-    "$VENV/bin/local-router" opencode config --output "$out"
-  fi
-  log "wrote $out (point OpenCode at it with: opencode --config $out)"
+  OPENCODE_CONFIG="${1:-$OPENCODE_CONFIG}"
+  write_opencode
+  log "wrote $OPENCODE_CONFIG"
+  echo "  launch: opencode --config $OPENCODE_CONFIG"
+  echo "  model:  local-router/$ROUTER_MODEL"
 }
 
 cmd_nginx() {
@@ -354,6 +387,7 @@ main() {
     status)        cmd_status "$@" ;;
     logs)          cmd_logs "$@" ;;
     test)          cmd_test "$@" ;;
+    curl | api)    cmd_curl "$@" ;;
     key | keys)    cmd_key "$@" ;;
     opencode)      cmd_opencode "$@" ;;
     nginx)         cmd_nginx "$@" ;;

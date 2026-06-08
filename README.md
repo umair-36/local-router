@@ -14,6 +14,11 @@ There are two ways to run a local model from this repo:
 
 ## Quickstart
 
+Requirements: Python 3.10+ with the `venv` module. On Debian/Ubuntu, install it
+once with `sudo apt-get install python3-venv`. The Ollama backend is installed
+automatically (its installer needs root, so run with sudo available, or install
+[Ollama](https://ollama.com/download) yourself first).
+
 ```bash
 cp .env.example .env     # defaults work as-is; edit if you like
 ./router.sh up

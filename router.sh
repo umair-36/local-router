@@ -90,7 +90,18 @@ wait_for() {
 ensure_venv() {
   if [ ! -x "$VENV/bin/python" ]; then
     log "creating virtualenv at $VENV"
-    python3 -m venv "$VENV"
+    if ! python3 -m venv "$VENV"; then
+      die "could not create a virtualenv at $VENV. On Debian/Ubuntu install the venv package first: sudo apt-get install python3-venv"
+    fi
+  fi
+  # A venv created without ensurepip (the usual symptom of a missing
+  # python3-venv on Debian/Ubuntu) has no pip, which later surfaces as a
+  # cryptic "No module named pip". Detect it here and give a fixable message.
+  if ! "$VENV/bin/python" -m pip --version >/dev/null 2>&1; then
+    log "bootstrapping pip in $VENV"
+    if ! "$VENV/bin/python" -m ensurepip --upgrade >/dev/null 2>&1; then
+      die "the virtualenv at $VENV has no pip and ensurepip is unavailable. Install your Python's venv package (Debian/Ubuntu: sudo apt-get install python3-venv), remove $VENV, then retry."
+    fi
   fi
   if [ ! -x "$VENV/bin/local-router" ] || [ "${ROUTER_FORCE_INSTALL:-0}" = "1" ]; then
     log "installing local-router into $VENV"
@@ -108,8 +119,14 @@ ensure_ollama() {
     if [ "${ROUTER_SKIP_OLLAMA_INSTALL:-0}" = "1" ]; then
       die "ollama is not installed (ROUTER_SKIP_OLLAMA_INSTALL=1); install it from https://ollama.com/download"
     fi
+    if [ -n "$sudo" ] && ! $sudo -n true 2>/dev/null; then
+      die "ollama is not installed and its installer needs root, but passwordless sudo is unavailable. Install ollama manually from https://ollama.com/download (or run this once with sudo), then retry. Once ollama is on PATH you can also set ROUTER_SKIP_OLLAMA_INSTALL=1."
+    fi
     log "installing ollama"
-    curl -fsSL https://ollama.com/install.sh | $sudo sh
+    if ! curl -fsSL https://ollama.com/install.sh | $sudo sh; then
+      die "automatic ollama install failed. Install it manually from https://ollama.com/download, then retry (set ROUTER_SKIP_OLLAMA_INSTALL=1 once ollama is on PATH)."
+    fi
+    command -v ollama >/dev/null 2>&1 || die "ollama still not found after install; install it manually from https://ollama.com/download and retry."
   fi
 
   if ! curl -fsS -o /dev/null "$native/api/tags" 2>/dev/null; then

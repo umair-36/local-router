@@ -117,6 +117,59 @@ its base URL to the router's `/v1` and its key to the router key.
 LiteRT is represented in capability/config validation but has no serve adapter;
 selecting it fails validation clearly.
 
+## 256K context: Gemma 4 12B (GGUF via llama.cpp)
+
+The default Ollama/Qwen path is for smoke tests. To serve **Gemma 4 12B** with
+its full **256K-token** context window, run it as a GGUF through llama.cpp. The
+model id `gemma-4-12b-qat` is already in [`models/catalog.yaml`](models/catalog.yaml)
+with `context_length: 262144`.
+
+> Heads-up on memory: the Q4_K_XL weights are ~6.7 GB, but a full 256K KV cache
+> adds many more GB. Plan for a large-RAM host or a GPU. The flags below quantize
+> the KV cache and enable flash attention to keep it manageable; if it still does
+> not fit, lower `--ctx-size` and `ROUTER_CONTEXT_LENGTH` together (e.g. `65536`).
+
+**1. Download the GGUF** into `models/`:
+
+```bash
+curl -L -o models/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf \
+  https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF/resolve/main/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+```
+
+**2. Serve it with llama.cpp's `llama-server`** at the full context. Use a
+[llama.cpp build](https://github.com/ggml-org/llama.cpp) (the router talks to
+`llama-server`'s `/health` and `/v1` endpoints):
+
+```bash
+llama-server \
+  --model models/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf \
+  --ctx-size 262144 \
+  --flash-attn \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --host 127.0.0.1 --port 8081
+  # add: --n-gpu-layers 99   to offload to a GPU
+```
+
+**3. Point the router at it** in `.env`:
+
+```bash
+ROUTER_BACKEND=llama_cpp
+ROUTER_MODEL=gemma-4-12b-qat
+ROUTER_CONTEXT_LENGTH=262144
+LLAMA_BASE_URL=http://127.0.0.1:8081/v1
+```
+
+**4. Bring the router up** and test:
+
+```bash
+./router.sh up
+./router.sh curl     # now hits Gemma 4 12B through the router
+```
+
+`router.sh up` waits for the `llama-server` at `LLAMA_BASE_URL` to be reachable,
+so start it (step 2) first. The router then advertises the 256K window on
+`/v1/models` and writes the OpenCode config with `gemma-4-12b-qat` available.
+
 ## Public IP access
 
 Keep the router on `127.0.0.1` and put nginx in front of it:

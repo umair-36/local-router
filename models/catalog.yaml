@@ -106,6 +106,10 @@ models:
       load_gb: 6.7
       note: Q4_K_XL weights are ~6.7 GB; a full 256K KV cache adds many GB on top, so the full window needs a large-RAM host or a GPU. Use flash attention and KV-cache quantization to fit, or lower the context.
     backends:
+      ollama:
+        model: gemma4:12b-it-qat
+        limitations:
+          - Q4_0 QAT weights (~7 GB) plus a vision projector; ollama pulls and serves it directly. The model supports up to 262144 tokens, but ollama only allocates the KV cache for ROUTER_CONTEXT_LENGTH (num_ctx), so the full 256K window needs a large-RAM host or GPU - lower ROUTER_CONTEXT_LENGTH to fit smaller machines.
       llama_cpp:
         gguf: /models/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
         limitations:
@@ -116,4 +120,4 @@ models:
       tool_calling: limited
       min_context_recommended: 16384
       notes:
-        - Full 256K-context Gemma 4 for long-context local coding via llama.cpp.
+        - Long-context Gemma 4 for local coding; served by ollama (gemma4:12b-it-qat) or llama.cpp up to its 256K window.

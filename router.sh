@@ -138,7 +138,33 @@ ensure_ollama() {
 
   local tag="${OLLAMA_MODEL_TAG:-}"
   if [ -z "$tag" ]; then
-    tag="$("$VENV/bin/python" -c "from local_router.catalog import ModelCatalog; print(ModelCatalog.load('models/catalog.yaml').get('$ROUTER_MODEL').backend_ref('ollama')['model'])")"
+    # Resolve the ollama tag from the catalog. Report a clear, actionable error
+    # (instead of a raw Python traceback) when ROUTER_MODEL is unknown or has no
+    # ollama backend - the usual symptom of pointing ROUTER_BACKEND=ollama at a
+    # llama.cpp-only model such as gemma-4-12b-qat.
+    if ! tag="$("$VENV/bin/python" - "$ROUTER_MODEL" <<'PY' 2>&1
+import sys
+
+from local_router.catalog import ModelCatalog
+
+model_id = sys.argv[1]
+try:
+    entry = ModelCatalog.load("models/catalog.yaml").get(model_id)
+except KeyError:
+    sys.exit(f"unknown ROUTER_MODEL '{model_id}': it is not listed in models/catalog.yaml")
+
+ref = entry.backend_ref("ollama")
+if not ref or not ref.get("model"):
+    backends = ", ".join((entry.data.get("backends") or {}).keys()) or "none"
+    sys.exit(
+        f"ROUTER_MODEL '{model_id}' has no ollama backend (catalog backends: {backends}). "
+        f"Set ROUTER_BACKEND in .env to one of those, or set OLLAMA_MODEL_TAG to a tag to pull directly."
+    )
+print(ref["model"])
+PY
+)"; then
+      die "$tag"
+    fi
   fi
   log "pulling model $tag"
   ollama pull "$tag"
